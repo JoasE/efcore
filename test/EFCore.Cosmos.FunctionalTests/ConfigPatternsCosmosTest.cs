@@ -58,7 +58,7 @@ public class ConfigPatternsCosmosTest(ConfigPatternsCosmosTest.CosmosFixture fix
         var customer = new Customer { Id = 42, Name = "Theon" };
 
         using var context = new CustomerContext(options);
-        await CosmosTestStore.DatabaseEnsureCreated(context);
+        await CosmosTestStore.CreateContainersFromContext(context);
 
         await context.AddAsync(customer);
 
@@ -76,7 +76,7 @@ public class ConfigPatternsCosmosTest(ConfigPatternsCosmosTest.CosmosFixture fix
             var customer = new Customer { Id = 42, Name = "Theon" };
 
             using var context = new CustomerContext(options);
-            await CosmosTestStore.DatabaseEnsureCreated(context);
+            await CosmosTestStore.CreateContainersFromContext(context);
 
             await context.AddAsync(customer);
 
@@ -100,7 +100,7 @@ public class ConfigPatternsCosmosTest(ConfigPatternsCosmosTest.CosmosFixture fix
         var customer = new Customer { Id = 42, Name = "Theon" };
 
         using var context = new CustomerContext(options);
-        await CosmosTestStore.DatabaseEnsureCreated(context);
+        await CosmosTestStore.CreateContainersFromContext(context);
 
         await context.AddAsync(customer);
 
@@ -119,7 +119,7 @@ public class ConfigPatternsCosmosTest(ConfigPatternsCosmosTest.CosmosFixture fix
             var customer = new Customer { Id = 42, Name = "Theon" };
 
             using var context = new CustomerContext(options);
-            await CosmosTestStore.DatabaseEnsureCreated(context);
+            await CosmosTestStore.CreateContainersFromContext(context);
 
             await context.AddAsync(customer);
 

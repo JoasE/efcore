@@ -146,21 +146,29 @@ public class CosmosTestStore : TestStore
             if (TestEnvironment.IsEmulator)
             {
                 // Clean up old emulator databases that tests might have left behind.
-                // We do this because the emulator will stop responding with much more than ~10 concurrent containers,
+                // We do this because the emulator will stop responding to create container requests with too many containers,
                 // and test runs might have been stopped in the middle leaving databases and containers behind.
                 var client = testStore.CreateDefaultContext().Database.GetCosmosClient();
                 using var iterator = client.GetDatabaseQueryIterator<DatabaseProperties>();
 
-                while (iterator.HasMoreResults)
+                await EmulatorCreateCollectionSemaphore.WaitAsync();
+                try
                 {
-                    var response = await iterator.ReadNextAsync();
-
-                    // This code will run after the first fixtures are initialized,
-                    // so we keep track of the databases we created in order to not delete them here.
-                    foreach (var db in response.Where(x => x.Id.StartsWith("EF-") && !_createdDatabases!.Contains(x.Id)))
+                    while (iterator.HasMoreResults)
                     {
-                        await client.GetDatabase(db.Id).DeleteAsync();
+                        var response = await iterator.ReadNextAsync();
+
+                        // This code will run after the first fixtures are initialized,
+                        // so we keep track of the databases we created in order to not delete them here.
+                        foreach (var db in response.Where(x => x.Id.StartsWith("EF-") && !_createdDatabases!.Contains(x.Id)))
+                        {
+                            await client.GetDatabase(db.Id).DeleteAsync();
+                        }
                     }
+                }
+                finally
+                {
+                    EmulatorCreateCollectionSemaphore.Release();
                 }
 
                 // We do not need to track created databases anymore,
@@ -228,12 +236,10 @@ public class CosmosTestStore : TestStore
         }
     }
 
-    public static async Task<bool> DatabaseEnsureCreated(DbContext context)
+    public static async Task<bool> CreateContainersFromContext(DbContext context)
     {
         if (TestEnvironment.IsEmulator)
         {
-            // The emulator has a race condition when creating containers concurrently,
-            // so we need to lock around EnsureCreated
             await EmulatorCreateCollectionSemaphore.WaitAsync();
         }
         try
@@ -251,11 +257,11 @@ public class CosmosTestStore : TestStore
 
     private async Task CreateFromFile(DbContext context)
     {
-        if (await EnsureCreatedAsync(context).ConfigureAwait(false))
+        if (await EnsureDatabaseCreatedAsync(context).ConfigureAwait(false))
         {
             if (!TestEnvironment.UseTokenCredential)
             {
-                await DatabaseEnsureCreated(context).ConfigureAwait(false);
+                await CreateContainersFromContext(context).ConfigureAwait(false);
             }
             else
             {
@@ -332,17 +338,25 @@ public class CosmosTestStore : TestStore
 
     private static readonly ArmClient _armClient = new(TestEnvironment.TokenCredential);
 
-    public async Task<bool> EnsureCreatedAsync(DbContext context, CancellationToken cancellationToken = default)
+    public async Task<bool> EnsureDatabaseCreatedAsync(DbContext context, CancellationToken cancellationToken = default)
     {
         if (!TestEnvironment.UseTokenCredential)
         {
             var cosmosClientWrapper = context.GetService<ICosmosClientWrapper>();
             var r = await cosmosClientWrapper.CreateDatabaseIfNotExistsAsync(null, cancellationToken).ConfigureAwait(false);
-            if (r)
+            if (r && _createdDatabases != null)
             {
-                // Keep track of created databases, to prevent them from being deleted in cleanup function,
-                // that could run after the creation of this database, due to xunit creating the first test fixtures before checking the availability of the connection.
-                _createdDatabases?.Add(Name);
+                await EmulatorCreateCollectionSemaphore.WaitAsync(cancellationToken);
+                try
+                {
+                    // Keep track of created databases, to prevent them from being deleted in cleanup function,
+                    // that could run after the creation of this database, due to xunit creating the first test fixtures before checking the availability of the connection.
+                    _createdDatabases?.Add(Name);
+                }
+                finally
+                {
+                    EmulatorCreateCollectionSemaphore.Release();
+                }
             }
 
             return r;
@@ -413,7 +427,7 @@ public class CosmosTestStore : TestStore
 
     public override async Task CleanAsync(DbContext context, bool createTables = true)
     {
-        var created = await EnsureCreatedAsync(context).ConfigureAwait(false);
+        var created = await EnsureDatabaseCreatedAsync(context).ConfigureAwait(false);
         try
         {
             if (!created)
@@ -428,7 +442,7 @@ public class CosmosTestStore : TestStore
 
             if (!TestEnvironment.UseTokenCredential)
             {
-                created = await DatabaseEnsureCreated(context).ConfigureAwait(false);
+                created = await CreateContainersFromContext(context).ConfigureAwait(false);
 
                 if (!created)
                 {

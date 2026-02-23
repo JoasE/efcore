@@ -57,7 +57,7 @@ public class ObjectArrayAccessExpression : Expression, IPrintableExpression, IAc
         var targetType = complexProperty.ComplexType;
         Type = typeof(IEnumerable<>).MakeGenericType(targetType.ClrType);
 
-        PropertyName = complexProperty.Name;
+        PropertyName = complexProperty.GetJsonPropertyName();
         PropertyBase = complexProperty;
         Object = @object;
         InnerProjection = innerProjection

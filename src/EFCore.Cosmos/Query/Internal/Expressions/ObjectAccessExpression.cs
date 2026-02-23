@@ -44,7 +44,7 @@ public class ObjectAccessExpression : Expression, IPrintableExpression, IAccessE
     public ObjectAccessExpression(Expression @object, IComplexProperty complexProperty)
     {
         PropertyBase = complexProperty;
-        PropertyName = complexProperty.Name;
+        PropertyName = complexProperty.GetJsonPropertyName();
         Object = @object;
         StructuralType = complexProperty.ComplexType;
     }

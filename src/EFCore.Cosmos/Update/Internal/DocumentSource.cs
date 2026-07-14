@@ -86,7 +86,7 @@ public class DocumentSource
     {
         writer.WriteStartObject();
 
-        // TODO: Get a better way to order the discriminator property first, without having to special case it here.
+        // TODO: Get a better way to order the discriminator property first, without having to special case it here. #38619
         IProperty? discriminatorProperty = null;
         if ((discriminatorProperty = structuralType.FindDiscriminatorProperty()) is not null)
         {

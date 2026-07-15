@@ -1624,6 +1624,792 @@ WHERE (c["Id"] = 4)
 
     #endregion
 
+    #region Bad primary keys
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Primary_key_baseline(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var entity = new ContextBadPrimaryKeyJsonProperties.Entity
+                {
+                    Id = 1,
+                    Associate = new() { Id = 2 },
+                    KeyedAssociate = new() { Id = 3 },
+                    AssociateCollection =
+                    [
+                        new() { Id = 4 },
+                        new() { Id = 5 }
+                    ],
+                    KeyedAssociateCollection =
+                    [
+                        new() { Id = 6 },
+                        new() { Id = 7 }
+                    ],
+                    ForeignKeyAssociate = new() { Id = 8 },
+                    KeyedForeignKeyAssociate = new() { Id = 9 },
+                    ForeignKeyAssociateCollection =
+                    [
+                        new() { Id = 9 },
+                        new() { Id = 10 }
+                    ],
+                    KeyedForeignKeyAssociateCollection =
+                    [
+                        new() { Id = 11 },
+                        new() { Id = 12 }
+                    ]
+                };
+
+                context.Add(entity);
+                await context.SaveChangesAsync();
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        var client = context.Database.GetCosmosClient();
+        var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+        var entityJson = JsonConvert.SerializeObject(
+            JsonConvert.DeserializeObject<ContextBadPrimaryKeyJsonProperties.Entity>("""
+{
+  "$type": "Entity",
+  "Id": 1,
+  "id": "1",
+  "Associate": {
+    "Id": 2
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+      "Id": 4
+    },
+    {
+      "Id": 5
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "KeyedForeignKeyAssociate": {
+    "Id": 9
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ],
+  "KeyedForeignKeyAssociateCollection": [
+    {
+      "Id": 11
+    },
+    {
+      "Id": 12
+    }
+  ]
+}
+"""));
+
+        var dbJson = JsonConvert.SerializeObject(
+            JsonConvert.DeserializeObject<ContextBadPrimaryKeyJsonProperties.Entity>(
+                new StreamReader(
+                    (await container.ReadItemStreamAsync("1", Azure.Cosmos.PartitionKey.None)).Content).ReadToEnd()));
+
+        Assert.Equal(entityJson, dbJson);
+
+        var entity = await context.Entities.SingleAsync();
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Root_null_primary_key_throws(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var client = context.Database.GetCosmosClient();
+                var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+                var entity = """
+{
+  "$type": "Entity",
+  "Id": null,
+  "id": "1",
+  "Associate": {
+    "Id": 2
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+      "Id": 4
+    },
+    {
+      "Id": 5
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ]
+}
+""";
+                await AdHocCosmosTestHelpers.CreateCustomEntityHelperAsync(
+                    container,
+                    entity,
+                    CancellationToken.None);
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        IQueryable<ContextBadPrimaryKeyJsonProperties.Entity> query = context.Entities;
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => query.SingleOrDefaultAsync());
+
+        Assert.Equal(CoreStrings.InvalidKeyValue("Entity", "Id"), ex.Message);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Root_missing_primary_key_throws(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var client = context.Database.GetCosmosClient();
+                var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+                var entity = """
+{
+  "$type": "Entity",
+  "id": "1",
+  "Associate": {
+    "Id": 2
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+      "Id": 4
+    },
+    {
+      "Id": 5
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ]
+}
+""";
+                await AdHocCosmosTestHelpers.CreateCustomEntityHelperAsync(
+                    container,
+                    entity,
+                    CancellationToken.None);
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        IQueryable<ContextBadPrimaryKeyJsonProperties.Entity> query = context.Entities;
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => query.SingleOrDefaultAsync());
+
+        Assert.Equal(CoreStrings.InvalidKeyValue("Entity", "Id"), ex.Message);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Associate_null_non_primary_key_doesnt_throw(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var client = context.Database.GetCosmosClient();
+                var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+                var entity = """
+{
+  "$type": "Entity",
+  "Id": 1,
+  "id": "1",
+  "Associate": {
+    "Id": null
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+      "Id": 4
+    },
+    {
+      "Id": 5
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ]
+}
+""";
+                await AdHocCosmosTestHelpers.CreateCustomEntityHelperAsync(
+                    container,
+                    entity,
+                    CancellationToken.None);
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        IQueryable<ContextBadPrimaryKeyJsonProperties.Entity> query = context.Entities;
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var result = await query.SingleAsync();
+        Assert.Equal(0, result.Associate.Id);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Associate_missing_non_primary_key_doesnt_throw(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var client = context.Database.GetCosmosClient();
+                var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+                var entity = """
+{
+  "$type": "Entity",
+  "Id": 1,
+  "id": "1",
+  "Associate": {
+    "Id": null
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+      "Id": 4
+    },
+    {
+      "Id": 5
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ]
+}
+""";
+                await AdHocCosmosTestHelpers.CreateCustomEntityHelperAsync(
+                    container,
+                    entity,
+                    CancellationToken.None);
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        IQueryable<ContextBadPrimaryKeyJsonProperties.Entity> query = context.Entities;
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var result = await query.SingleAsync();
+        Assert.Equal(0, result.Associate.Id);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AssociateCollection_null_primary_key_doesnt_throw(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var client = context.Database.GetCosmosClient();
+                var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+                var entity = """
+{
+  "$type": "Entity",
+  "Id": 1,
+  "id": "1",
+  "Associate": {
+    "Id": 2
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+      "Id": 4
+    },
+    {
+      "Id": null
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ]
+}
+""";
+                await AdHocCosmosTestHelpers.CreateCustomEntityHelperAsync(
+                    container,
+                    entity,
+                    CancellationToken.None);
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        IQueryable<ContextBadPrimaryKeyJsonProperties.Entity> query = context.Entities;
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var result = await query.SingleAsync();
+        Assert.Equal(2, result.AssociateCollection.Last().Id);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AssociateCollection_all_null_primary_key_doesnt_throw(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var client = context.Database.GetCosmosClient();
+                var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+                var entity = """
+{
+  "$type": "Entity",
+  "Id": 1,
+  "id": "1",
+  "Associate": {
+    "Id": 2
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+      "Id": null
+    },
+    {
+      "Id": null
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ]
+}
+""";
+                await AdHocCosmosTestHelpers.CreateCustomEntityHelperAsync(
+                    container,
+                    entity,
+                    CancellationToken.None);
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        IQueryable<ContextBadPrimaryKeyJsonProperties.Entity> query = context.Entities;
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var result = await query.SingleAsync();
+        Assert.Equal(2, result.AssociateCollection.Last().Id);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AssociateCollection_missing_primary_key_doesnt_throw(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var client = context.Database.GetCosmosClient();
+                var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+                var entity = """
+{
+  "$type": "Entity",
+  "Id": 1,
+  "id": "1",
+  "Associate": {
+    "Id": 2
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+      "Id": 4
+    },
+    {
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ]
+}
+""";
+                await AdHocCosmosTestHelpers.CreateCustomEntityHelperAsync(
+                    container,
+                    entity,
+                    CancellationToken.None);
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        IQueryable<ContextBadPrimaryKeyJsonProperties.Entity> query = context.Entities;
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var result = await query.SingleAsync();
+        Assert.Equal(2, result.AssociateCollection.Last().Id);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AssociateCollection_all_missing_primary_key_doesnt_throw(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var client = context.Database.GetCosmosClient();
+                var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+                var entity = """
+{
+  "$type": "Entity",
+  "Id": 1,
+  "id": "1",
+  "Associate": {
+    "Id": 2
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+    },
+    {
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ]
+}
+""";
+                await AdHocCosmosTestHelpers.CreateCustomEntityHelperAsync(
+                    container,
+                    entity,
+                    CancellationToken.None);
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        IQueryable<ContextBadPrimaryKeyJsonProperties.Entity> query = context.Entities;
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var result = await query.SingleAsync();
+        Assert.Equal(2, result.AssociateCollection.Last().Id);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task KeyedAssociateCollection_null_primary_key_doesnt_throw(bool tracking)
+    {
+        var contextFactory = await InitializeNonSharedTest<ContextBadPrimaryKeyJsonProperties>(
+            onConfiguring: b => b.ConfigureWarnings(ConfigureWarnings),
+            seed: async context =>
+            {
+                var client = context.Database.GetCosmosClient();
+                var container = client.GetContainer(context.Database.GetCosmosDatabaseId(), containerId: "Entities");
+
+                var entity = """
+{
+  "$type": "Entity",
+  "Id": 1,
+  "id": "1",
+  "Associate": {
+    "Id": 2
+  },
+  "KeyedAssociate": {},
+  "AssociateCollection": [
+    {
+      "Id": 4
+    },
+    {
+      "Id": 5
+    }
+  ],
+  "KeyedAssociateCollection": [
+    {
+      "Id": 6,
+      "EntityId": 1
+    },
+    {
+      "Id": 7,
+      "EntityId": 1
+    }
+  ],
+  "ForeignKeyAssociate": {
+    "Id": 8
+  },
+  "ForeignKeyAssociateCollection": [
+    {
+      "Id": 9
+    },
+    {
+      "Id": 10
+    }
+  ]
+}
+""";
+                await AdHocCosmosTestHelpers.CreateCustomEntityHelperAsync(
+                    container,
+                    entity,
+                    CancellationToken.None);
+            });
+
+        using var context = contextFactory.CreateDbContext();
+        IQueryable<ContextBadPrimaryKeyJsonProperties.Entity> query = context.Entities;
+        if (!tracking)
+        {
+            query = query.AsNoTracking();
+        }
+
+        var result = await query.SingleAsync();
+        Assert.Equal(2, result.AssociateCollection.Last().Id);
+    }
+
+    private class ContextBadPrimaryKeyJsonProperties : DbContext
+    {
+        public ContextBadPrimaryKeyJsonProperties(DbContextOptions options)
+            : base(options)
+        {
+        }
+
+        public DbSet<Entity> Entities { get; set; } = null!;
+
+        public class Entity
+        {
+            public int Id { get; set; }
+
+            public AssociateEntity Associate { get; set; } = null!;
+            public AssociateEntity KeyedAssociate { get; set; } = null!;
+
+            public List<AssociateEntity> AssociateCollection { get; set; } = new();
+            public List<AssociateEntity> KeyedAssociateCollection { get; set; } = new();
+
+            public ForeignKeyAssociateEntity ForeignKeyAssociate { get; set; } = null!;
+            public ForeignKeyAssociateEntity KeyedForeignKeyAssociate { get; set; } = null!;
+
+            public List<ForeignKeyAssociateEntity> ForeignKeyAssociateCollection { get; set; } = new();
+            public List<ForeignKeyAssociateEntity> KeyedForeignKeyAssociateCollection { get; set; } = new();
+        }
+
+        public class AssociateEntity
+        {
+            public int Id { get; set; }
+        }
+
+        public class ForeignKeyAssociateEntity
+        {
+            public int Id { get; set; }
+
+            public int EntityId { get; set; }
+        }
+
+        protected override void OnModelCreating(ModelBuilder modelBuilder)
+        {
+            var entity = modelBuilder.Entity<Entity>();
+            entity.ToContainer("Entities");
+            entity.OwnsOne(x => x.Associate);
+            entity.OwnsOne(x => x.KeyedAssociate, b => b.HasKey(x => x.Id));
+            entity.OwnsMany(x => x.AssociateCollection);
+            entity.OwnsMany(x => x.KeyedAssociateCollection, b => b.HasKey(x => x.Id));
+
+            entity.OwnsOne(x => x.ForeignKeyAssociate);
+            entity.OwnsOne(x => x.KeyedForeignKeyAssociate, b => b.HasKey(x => x.Id));
+            entity.OwnsMany(x => x.ForeignKeyAssociateCollection);
+            entity.OwnsMany(x => x.KeyedForeignKeyAssociateCollection, b => b.HasKey(x => x.Id));
+        }
+    }
+
+    #endregion
+
     protected TestSqlLoggerFactory TestSqlLoggerFactory
         => (TestSqlLoggerFactory)ListLoggerFactory;
 
